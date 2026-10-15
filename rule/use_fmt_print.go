@@ -52,6 +52,10 @@ func (w lintUseFmtPrint) Visit(node ast.Node) ast.Visitor {
 		return nil
 	}
 
+	if id.Obj != nil {
+		return w // A lexical binding shadows the predeclared function.
+	}
+
 	name := id.Name
 	switch name {
 	case "print":

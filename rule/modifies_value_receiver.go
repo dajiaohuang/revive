@@ -30,7 +30,7 @@ func (r *ModifiesValRecRule) Apply(file *lint.File, _ lint.Arguments) []lint.Fai
 		}
 
 		receiverName := receiver.Names[0].Name
-		assignmentsToReceiver := r.getReceiverModifications(receiverName, funcDecl.Body)
+		assignmentsToReceiver := r.getReceiverModifications(receiver.Names[0], funcDecl.Body)
 		if len(assignmentsToReceiver) == 0 {
 			continue // receiver is not modified
 		}
@@ -142,10 +142,14 @@ func (r *ModifiesValRecRule) mustSkip(receiver *ast.Field, pkg *lint.Package) bo
 	return false
 }
 
-func (r *ModifiesValRecRule) getReceiverModifications(receiverName string, funcBody *ast.BlockStmt) []ast.Node {
+func (r *ModifiesValRecRule) getReceiverModifications(receiver *ast.Ident, funcBody *ast.BlockStmt) []ast.Node {
+	receiverName := receiver.Name
 	receiverModificationFinder := func(n ast.Node) bool {
 		switch node := n.(type) {
 		case *ast.IncDecStmt:
+			if id, ok := node.X.(*ast.Ident); ok {
+				return id.Obj == receiver.Obj
+			}
 			se, ok := node.X.(*ast.SelectorExpr)
 			if !ok {
 				return false

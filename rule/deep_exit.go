@@ -3,6 +3,7 @@ package rule
 import (
 	"fmt"
 	"go/ast"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -21,7 +22,20 @@ func (*DeepExitRule) Apply(file *lint.File, _ lint.Arguments) []lint.Failure {
 		failures = append(failures, failure)
 	}
 
-	w := &lintDeepExit{onFailure: onFailure, isTestFile: file.IsTest()}
+	imports := map[string]string{}
+	for _, spec := range file.AST.Imports {
+		// The Go parser has already validated this string literal.
+		path, _ := strconv.Unquote(spec.Path.Value)
+		switch path {
+		case "os", "syscall", "log", "flag":
+			name := path
+			if spec.Name != nil {
+				name = spec.Name.Name
+			}
+			imports[name] = path
+		}
+	}
+	w := &lintDeepExit{onFailure: onFailure, isTestFile: file.IsTest(), imports: imports}
 	ast.Walk(w, file.AST)
 	return failures
 }
@@ -34,6 +48,7 @@ func (*DeepExitRule) Name() string {
 type lintDeepExit struct {
 	onFailure  func(lint.Failure)
 	isTestFile bool
+	imports    map[string]string
 }
 
 func (w *lintDeepExit) Visit(node ast.Node) ast.Visitor {
@@ -63,16 +78,21 @@ func (w *lintDeepExit) Visit(node ast.Node) ast.Visitor {
 		return w
 	}
 
-	pkg := id.Name
+	pkg := w.importedPackage(id)
 	fn := fc.Sel.Name
-	if astutils.IsCallToExitFunction(pkg, fn, ce.Args) {
+	var exits bool
+	if pkg == "flag" && fn == "NewFlagSet" {
+		exits = len(ce.Args) == 2 && w.isFlagExitOnError(ce.Args[1])
+	} else {
+		exits = astutils.IsCallToExitFunction(pkg, fn, ce.Args)
+	}
+	if exits {
 		msg := fmt.Sprintf("calls to %s.%s only in main() or init() functions", pkg, fn)
 
 		switch {
 		case pkg == "flag" && fn == "Parse":
 			msg += "; move the call or refactor to use flag.NewFlagSet with flag.ContinueOnError"
-		case pkg == "flag" && fn == "NewFlagSet" &&
-			len(ce.Args) == 2 && astutils.IsPkgDotName(ce.Args[1], "flag", "ExitOnError"):
+		case pkg == "flag" && fn == "NewFlagSet":
 			msg = "calls to flag.NewFlagSet with flag.ExitOnError only in main() or init() functions"
 		}
 		w.onFailure(lint.Failure{
@@ -84,6 +104,22 @@ func (w *lintDeepExit) Visit(node ast.Node) ast.Visitor {
 	}
 
 	return w
+}
+
+func (w *lintDeepExit) importedPackage(id *ast.Ident) string {
+	if id.Obj != nil && id.Obj.Kind != ast.Pkg {
+		return "" // This identifier is a local binding, not the imported package.
+	}
+	return w.imports[id.Name]
+}
+
+func (w *lintDeepExit) isFlagExitOnError(expr ast.Expr) bool {
+	selector, ok := expr.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	id, ok := selector.X.(*ast.Ident)
+	return ok && w.importedPackage(id) == "flag" && selector.Sel.Name == "ExitOnError"
 }
 
 func (w *lintDeepExit) mustIgnore(fd *ast.FuncDecl) bool {

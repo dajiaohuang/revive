@@ -44,7 +44,7 @@ func (r *FileLengthLimitRule) Apply(file *lint.File, _ lint.Arguments) []lint.Fa
 
 	lines := all
 	if r.skipComments {
-		lines -= countCommentLines(file.AST.Comments)
+		lines -= countCommentLines(file.AST.Comments, r.skipBlankLines)
 	}
 
 	if r.skipBlankLines {
@@ -114,7 +114,7 @@ func (*FileLengthLimitRule) Name() string {
 	return "file-length-limit"
 }
 
-func countCommentLines(comments []*ast.CommentGroup) int {
+func countCommentLines(comments []*ast.CommentGroup, skipBlankLines bool) int {
 	count := 0
 	for _, cg := range comments {
 		for _, comment := range cg.List {
@@ -125,7 +125,11 @@ func countCommentLines(comments []*ast.CommentGroup) int {
 			case '/': // single-line comment
 				count++
 			case '*': // multi-line comment
-				count += strings.Count(comment.Text, "\n") + 1
+				for _, line := range strings.Split(comment.Text, "\n") {
+					if !skipBlankLines || strings.TrimSpace(line) != "" {
+						count++
+					}
+				}
 			}
 		}
 	}

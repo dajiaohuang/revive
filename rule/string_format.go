@@ -276,8 +276,8 @@ func (r *stringFormatSubrule) apply(call *ast.CallExpr, scope *stringFormatSubru
 		return
 	}
 
-	// Unquote the string literal before linting
-	unquoted := lit.Value[1 : len(lit.Value)-1]
+	// The Go parser has already validated this string literal.
+	unquoted, _ := strconv.Unquote(lit.Value)
 	if r.stringIsOK(unquoted) {
 		return
 	}
